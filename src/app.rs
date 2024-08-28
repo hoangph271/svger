@@ -3,41 +3,39 @@
 use std::collections::HashMap;
 
 use crate::fl;
-use cosmic::app::{Command, Core};
-use cosmic::iced::alignment::{Horizontal, Vertical};
-use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{self, icon, menu, nav_bar};
-use cosmic::{cosmic_theme, theme, Application, ApplicationExt, Apply, Element};
+use cosmic::app::{Command, Core, Message};
+use cosmic::iced::{self, event, Alignment, Event, Length};
+use cosmic::iced_runtime::window;
+use cosmic::widget::{self, menu};
+use cosmic::{cosmic_theme, style, theme, Application, ApplicationExt, Element};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 const REPOSITORY: &str = "https://github.com/edfloreshz/cosmic-app-template";
+const SVG_DIR: &str = "/Users/huyhoangphan/useCode/useGlmr/lightbeam-web/src/assets/inlineSvg";
+const GRID_ITEM_WIDTH: usize = 256;
 
 /// This is the struct that represents your application.
 /// It is used to define the data that will be used by your application.
-pub struct YourApp {
+pub struct Svger {
     /// Application state which is managed by the COSMIC runtime.
     core: Core,
     /// Display a context drawer with the designated page if defined.
     context_page: ContextPage,
     /// Key bindings for the application's menu bar.
     key_binds: HashMap<menu::KeyBind, MenuAction>,
-    /// A model that contains all of the pages assigned to the nav bar panel.
-    nav: nav_bar::Model,
+    svg_files: Vec<PathBuf>,
+    grid_rows_count: Option<usize>,
 }
 
 /// This is the enum that contains all the possible variants that your application will need to transmit messages.
 /// This is used to communicate between the different parts of your application.
 /// If your application does not need to send messages, you can use an empty enum or `()`.
 #[derive(Debug, Clone)]
-pub enum Message {
+pub enum SvgerMessage {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
-}
-
-/// Identifies a page in the application.
-pub enum Page {
-    Page1,
-    Page2,
-    Page3,
+    UpdateGridRowsCount(Option<usize>),
 }
 
 /// Identifies a context page to display in the context drawer.
@@ -61,13 +59,31 @@ pub enum MenuAction {
 }
 
 impl menu::action::MenuAction for MenuAction {
-    type Message = Message;
+    type Message = SvgerMessage;
 
     fn message(&self) -> Self::Message {
         match self {
-            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+            MenuAction::About => SvgerMessage::ToggleContextPage(ContextPage::About),
         }
     }
+}
+
+fn list_svg_files(dir: &str) -> Vec<PathBuf> {
+    let path = Path::new(dir);
+    let mut svg_files = Vec::new();
+
+    if path.is_dir() {
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().map_or(false, |ext| ext == "svg") {
+                    svg_files.push(path);
+                }
+            }
+        }
+    }
+
+    svg_files
 }
 
 /// Implement the `Application` trait for your application.
@@ -78,14 +94,14 @@ impl menu::action::MenuAction for MenuAction {
 /// - `Flags` is the data that your application needs to use before it starts.
 /// - `Message` is the enum that contains all the possible variants that your application will need to transmit messages.
 /// - `APP_ID` is the unique identifier of your application.
-impl Application for YourApp {
+impl Application for Svger {
     type Executor = cosmic::executor::Default;
+
+    const APP_ID: &'static str = "com.example.CosmicAppTemplate";
 
     type Flags = ();
 
-    type Message = Message;
-
-    const APP_ID: &'static str = "com.example.CosmicAppTemplate";
+    type Message = SvgerMessage;
 
     fn core(&self) -> &Core {
         &self.core
@@ -93,11 +109,6 @@ impl Application for YourApp {
 
     fn core_mut(&mut self) -> &mut Core {
         &mut self.core
-    }
-
-    /// Instructs the cosmic runtime to use this model as the nav bar model.
-    fn nav_model(&self) -> Option<&nav_bar::Model> {
-        Some(&self.nav)
     }
 
     /// This is the entry point of your application, it is where you initialize your application.
@@ -108,32 +119,15 @@ impl Application for YourApp {
     /// - `flags` is used to pass in any data that your application needs to use before it starts.
     /// - `Command` type is used to send messages to your application. `Command::none()` can be used to send no messages to your application.
     fn init(core: Core, _flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        let mut nav = nav_bar::Model::default();
-
-        nav.insert()
-            .text("Page 1")
-            .data::<Page>(Page::Page1)
-            .icon(icon::from_name("applications-science-symbolic"))
-            .activate();
-
-        nav.insert()
-            .text("Page 2")
-            .data::<Page>(Page::Page2)
-            .icon(icon::from_name("applications-system-symbolic"));
-
-        nav.insert()
-            .text("Page 3")
-            .data::<Page>(Page::Page3)
-            .icon(icon::from_name("applications-games-symbolic"));
-
-        let mut app = YourApp {
+        let mut app = Svger {
             core,
             context_page: ContextPage::default(),
             key_binds: HashMap::new(),
-            nav,
+            svg_files: list_svg_files(SVG_DIR),
+            grid_rows_count: None,
         };
 
-        let command = app.update_titles();
+        let command = Command::batch([app.update_titles(), app.update_grid_rows_count()]);
 
         (app, command)
     }
@@ -158,13 +152,47 @@ impl Application for YourApp {
     ///
     /// To get a better sense of which widgets are available, check out the `widget` module.
     fn view(&self) -> Element<Self::Message> {
-        widget::text::title1(fl!("welcome"))
-            .apply(widget::container)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .align_y(Vertical::Center)
-            .into()
+        let Some(grid_rows_count) = self.grid_rows_count else {
+            return widget::text::caption(fl!("welcome")).into();
+        };
+
+        let mut svg_grid = widget::grid();
+
+        let mut row_count = 0;
+
+        for path in self.svg_files.iter() {
+            svg_grid = svg_grid.push(
+                widget::column()
+                    .push(
+                        widget::svg(widget::svg::Handle::from_path(path))
+                            .width(96)
+                            .height(96),
+                    )
+                    .push(widget::text::caption(
+                        path.file_name().unwrap().to_str().unwrap(),
+                    ))
+                    .spacing(8)
+                    .align_items(Alignment::Center),
+            );
+
+            row_count += 1;
+
+            if row_count == grid_rows_count {
+                svg_grid = svg_grid.insert_row();
+                row_count = 0;
+            }
+        }
+
+        widget::container(widget::scrollable(
+            svg_grid
+                .column_alignment(Alignment::Center)
+                .row_alignment(Alignment::Center)
+                .row_spacing(16)
+                .column_spacing(8)
+                .width(Length::Fill),
+        ))
+        .width(Length::Fill)
+        .into()
     }
 
     /// Application messages are handled here. The application state can be modified based on
@@ -172,11 +200,10 @@ impl Application for YourApp {
     /// background thread managed by the application's executor.
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::LaunchUrl(url) => {
+            SvgerMessage::LaunchUrl(url) => {
                 let _result = open::that_detached(url);
             }
-
-            Message::ToggleContextPage(context_page) => {
+            SvgerMessage::ToggleContextPage(context_page) => {
                 if self.context_page == context_page {
                     // Close the context drawer if the toggled context page is the same.
                     self.core.window.show_context = !self.core.window.show_context;
@@ -188,6 +215,9 @@ impl Application for YourApp {
 
                 // Set the title of the context drawer.
                 self.set_context_title(context_page.title());
+            }
+            SvgerMessage::UpdateGridRowsCount(grid_rows_count) => {
+                self.grid_rows_count = grid_rows_count;
             }
         }
         Command::none()
@@ -204,18 +234,30 @@ impl Application for YourApp {
         })
     }
 
-    /// Called when a nav item is selected.
-    fn on_nav_select(&mut self, id: nav_bar::Id) -> Command<Self::Message> {
-        // Activate the page in the model.
-        self.nav.activate(id);
-
-        self.update_titles()
+    fn subscription(&self) -> cosmic::iced::Subscription<Self::Message> {
+        event::listen_with(|message, _| match message {
+            Event::Window(window_id, window_event) => {
+                if window_id == window::Id::MAIN {
+                    match window_event {
+                        iced::window::Event::Resized { width, height: _ } => {
+                            Some(SvgerMessage::UpdateGridRowsCount(Some(
+                                width as usize / GRID_ITEM_WIDTH,
+                            )))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
     }
 }
 
-impl YourApp {
+impl Svger {
     /// The about page for this app.
-    pub fn about(&self) -> Element<Message> {
+    pub fn about(&self) -> Element<SvgerMessage> {
         let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
 
         let icon = widget::svg(widget::svg::Handle::from_memory(
@@ -226,7 +268,7 @@ impl YourApp {
         let title = widget::text::title3(fl!("app-title"));
 
         let link = widget::button::link(REPOSITORY)
-            .on_press(Message::LaunchUrl(REPOSITORY.to_string()))
+            .on_press(SvgerMessage::LaunchUrl(REPOSITORY.to_string()))
             .padding(0);
 
         widget::column()
@@ -239,17 +281,20 @@ impl YourApp {
     }
 
     /// Updates the header and window titles.
-    pub fn update_titles(&mut self) -> Command<Message> {
-        let mut window_title = fl!("app-title");
-        let mut header_title = String::new();
+    pub fn update_titles(&mut self) -> Command<SvgerMessage> {
+        let window_title = fl!("app-title");
 
-        if let Some(page) = self.nav.text(self.nav.active()) {
-            window_title.push_str(" — ");
-            window_title.push_str(page);
-            header_title.push_str(page);
-        }
-
-        self.set_header_title(header_title);
         self.set_window_title(window_title)
+    }
+
+    pub fn update_grid_rows_count(&mut self) -> Command<SvgerMessage> {
+        window::fetch_size(window::Id::MAIN, move |size| {
+            let grid_rows_count = size.width as usize / GRID_ITEM_WIDTH;
+
+            grid_rows_count
+        })
+        .map(|grid_rows_count| {
+            Message::from(SvgerMessage::UpdateGridRowsCount(Some(grid_rows_count)))
+        })
     }
 }
