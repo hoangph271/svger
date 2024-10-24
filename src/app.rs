@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const REPOSITORY: &str = "https://github.com/edfloreshz/cosmic-app-template";
-const SVG_DIR: &str = "/Users/huyhoangphan/useCode/useGlmr/lightbeam-web/src/assets/inlineSvg";
+const SVG_DIR: &str = "";
 const GRID_ITEM_WIDTH: usize = 256;
 
 /// This is the struct that represents your application.
